@@ -27,8 +27,16 @@ st.set_page_config(page_title="自己啓発レポート自動生成 (Cloud版)",
 st.title("自己啓発レポート 自動作成ツール ☁️クラウド版")
 st.write("このバージョンはiPadやスマホなど、ブラウザ経由でどこからでもアクセスし、Wordファイルを直接ダウンロードできるように設計されています。")
 
-# 環境変数からAPIキーを取得
-api_key = os.environ.get("GOOGLE_API_KEY", "")
+# 環境変数またはStreamlit SecretsからAPIキーを取得
+api_key = ""
+try:
+    if "GOOGLE_API_KEY" in st.secrets:
+        api_key = st.secrets["GOOGLE_API_KEY"]
+except:
+    pass
+if not api_key:
+    api_key = os.environ.get("GOOGLE_API_KEY", "")
+
 if api_key:
     genai.configure(api_key=api_key)
 else:
@@ -105,8 +113,9 @@ def generate_report(target_part="all"):
     prompt += "以下のJSON形式のフォーマットに沿って、必要な項目だけを出力してください。キー以外の文字列は出力しないでください。\n{\n  " + ",\n  ".join(req_instructions) + "\n}"
 
     model = genai.GenerativeModel("gemini-2.5-flash", generation_config={"response_mime_type": "application/json"})
-    response = model.generate_content(prompt)
+    
     try:
+        response = model.generate_content(prompt)
         result_json = json.loads(response.text)
         if target_part == "all":
             st.session_state.report_parts["part1"] = result_json.get("part1", "")
@@ -116,7 +125,10 @@ def generate_report(target_part="all"):
         else:
             st.session_state.report_parts[target_part] = result_json.get(target_part, "")
     except Exception as e:
-        st.error(f"生成結果のパースに失敗しました: {e}")
+        if "ResourceExhausted" in str(e) or "429" in str(e):
+            st.error("⚠️ AIの利用制限（アクセス集中）に達しました。1〜2分ほど待ってから再度お試しください！")
+        else:
+            st.error(f"文章の生成中にエラーが発生しました: {e}")
 
 # --- 画面UI ---
 with st.container():
