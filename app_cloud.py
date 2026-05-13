@@ -86,19 +86,25 @@ def search_author_with_ai(title, category):
     return []
 
 def generate_report(target_part="all"):
+    daily_duties_text = f"日常業務: {keywords}" if keywords else "日常業務の詳細: 未入力（部門名から推測してください）"
+
     prompt = f"""
 あなたは会社へ提出する自己啓発レポート（{category}）を作成する優秀なアシスタントです。
 以下の情報を元に、指定された項目についてレポートの本文を作成してください。
 
 【基本情報】
 部門: {department}
+{daily_duties_text}
 レポートの種類: {category}
 題名: {title}
-使いたいワード・テーマ: {keywords}
+
+【作成上の注意】
+・日常業務の記載がある場合は、その具体的な業務内容と「題名（書籍/講習）」の内容を深く関連付けて記述してください。
+・日常業務の記載がない場合は、部門名から一般的な業務を推測して関連付けてください。
+・「今後の活かし方」と「具体的に取組んでいること」は、特に具体的なアクションに結びつけて作成してください。
 
 【インターネット検索による情報（参考）】
 {st.session_state.search_context}
-
 """
     req_instructions = []
     if target_part == "all" or target_part == "part1":
@@ -129,6 +135,8 @@ def generate_report(target_part="all"):
             st.error("⚠️ AIの利用制限（アクセス集中）に達しました。1〜2分ほど待ってから再度お試しください！")
         else:
             st.error(f"文章の生成中にエラーが発生しました: {e}")
+        return False
+    return True
 
 # --- 画面UI ---
 with st.container():
@@ -162,7 +170,7 @@ with st.container():
             author_final = selected_author_opt
 
     with col3:
-        keywords = st.text_area("使いたいワード・テーマ", placeholder="例: リーダーシップなど", height=280)
+        keywords = st.text_area("あなたの日常業務", placeholder="例: 自動車部品の品質管理、顧客への提案営業など。具体的に書くほど精度の高いレポートになります。", height=280)
 
     if st.button("全体を新しく生成する（全自動）", type="primary", use_container_width=True):
         if not department or not title:
@@ -170,8 +178,9 @@ with st.container():
         else:
             with st.spinner("情報を検索し、レポート全体を生成しています..."):
                 st.session_state.search_context = fetch_search_context(category, title)
-                generate_report("all")
-            st.rerun()
+                success = generate_report("all")
+            if success:
+                st.rerun()
 
 st.divider()
 
