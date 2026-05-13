@@ -271,21 +271,64 @@ if any(st.session_state.report_parts.values()):
             doc = DocxTemplate(template_path)
             doc.render(context)
             
-            # メモリ上に保存してダウンロードボタン化
-            bio = io.BytesIO()
-            doc.save(bio)
+            # メモリ上に保存
+            bio_docx = io.BytesIO()
+            doc.save(bio_docx)
             
+            # --- PDF変換処理 (LibreOfficeを使用) ---
+            pdf_data = None
+            try:
+                import subprocess
+                import tempfile
+                
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    # 一時的にdocxを保存
+                    tmp_docx_path = os.path.join(tmp_dir, "input.docx")
+                    doc.save(tmp_docx_path)
+                    
+                    # LibreOfficeでPDF変換を実行
+                    # 注: クラウド環境にlibreofficeがインストールされている必要があります
+                    subprocess.run([
+                        "libreoffice", "--headless", "--convert-to", "pdf",
+                        "--outdir", tmp_dir, tmp_docx_path
+                    ], check=True, capture_output=True)
+                    
+                    tmp_pdf_path = os.path.join(tmp_dir, "input.pdf")
+                    if os.path.exists(tmp_pdf_path):
+                        with open(tmp_pdf_path, "rb") as f:
+                            pdf_data = f.read()
+            except Exception as pdf_err:
+                # PDF変換に失敗してもDOCXは出せるようにエラーは警告に留める
+                print(f"PDF conversion error: {pdf_err}")
+
             date_str = datetime.datetime.now().strftime("%Y%m%d")
             safe_name = emp_name if emp_name else "未入力"
-            dl_filename = f"{date_str}_{safe_name}_自己啓発レポート.docx"
+            dl_filename_docx = f"{date_str}_{safe_name}_自己啓発レポート.docx"
+            dl_filename_pdf = f"{date_str}_{safe_name}_自己啓発レポート.pdf"
             
-            st.download_button(
-                label="📥 完成したWord（.docx）をダウンロード",
-                data=bio.getvalue(),
-                file_name=dl_filename,
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                type="primary",
-                use_container_width=True
-            )
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                st.download_button(
+                    label="📥 Word（.docx）を保存",
+                    data=bio_docx.getvalue(),
+                    file_name=dl_filename_docx,
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    type="primary",
+                    use_container_width=True
+                )
+            
+            with col_btn2:
+                if pdf_data:
+                    st.download_button(
+                        label="📥 PDF（.pdf）を保存",
+                        data=pdf_data,
+                        file_name=dl_filename_pdf,
+                        mime="application/pdf",
+                        type="primary",
+                        use_container_width=True
+                    )
+                else:
+                    st.info("💡 PDF変換はクラウド環境でのみ有効です。")
+
         except Exception as e:
-            st.error(f"Wordファイルの生成中にエラーが発生しました: {e}")
+            st.error(f"ファイルの生成中にエラーが発生しました: {e}")
