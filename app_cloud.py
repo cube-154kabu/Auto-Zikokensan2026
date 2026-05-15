@@ -6,6 +6,7 @@ import datetime
 from duckduckgo_search import DDGS
 from dotenv import load_dotenv
 import io
+import time
 
 # -------------------------------------------------------------
 # 【注意】このファイルはクラウド（Linux等のWebサーバー）での動作を
@@ -54,6 +55,7 @@ if "author_candidates" not in st.session_state:
     st.session_state.author_candidates = []
 
 # --- 検索・生成処理関数（ローカル版と共通） ---
+@st.cache_data(show_spinner=False)
 def fetch_search_context(category, title):
     search_context = ""
     if not title: return search_context
@@ -68,14 +70,34 @@ def fetch_search_context(category, title):
         pass
     return search_context
 
+@st.cache_data(show_spinner=False)
+def call_gemini_api_with_retry(prompt, response_mime_type="application/json", model_name="gemini-3.1-flash-lite"):
+    """
+    Gemini APIを呼び出す共通関数（再試行ロジック付き）
+    """
+    max_retries = 3
+    base_delay = 2 # 秒
+    
+    for attempt in range(max_retries):
+        try:
+            model = genai.GenerativeModel(model_name, generation_config={"response_mime_type": response_mime_type})
+            response = model.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            if ("ResourceExhausted" in str(e) or "429" in str(e)) and attempt < max_retries - 1:
+                time.sleep(base_delay * (2 ** attempt)) # 指数バックオフ
+                continue
+            raise e
+    return None
+
 def search_author_with_ai(title, category):
     if not title: return []
     label = "著者名" if category == "読書感想文" else "主催者名や講師名"
     prompt = f"以下の題名に関連する「{label}」の候補を最大3つ挙げてください。必ずJSONの文字列配列形式（例: [\"候補1\", \"候補2\"]）で出力してください。\n題名: {title}"
     try:
-        model = genai.GenerativeModel("gemini-2.5-flash", generation_config={"response_mime_type": "application/json"})
-        response = model.generate_content(prompt)
-        res = json.loads(response.text)
+        # キャッシュされた関数を呼び出す
+        response_text = call_gemini_api_with_retry(prompt)
+        res = json.loads(response_text)
         if isinstance(res, list): 
             return [str(x) for x in res]
         elif isinstance(res, dict):
@@ -118,11 +140,10 @@ def generate_report(target_part="all"):
 
     prompt += "以下のJSON形式のフォーマットに沿って、必要な項目だけを出力してください。キー以外の文字列は出力しないでください。\n{\n  " + ",\n  ".join(req_instructions) + "\n}"
 
-    model = genai.GenerativeModel("gemini-2.5-flash", generation_config={"response_mime_type": "application/json"})
-    
     try:
-        response = model.generate_content(prompt)
-        result_json = json.loads(response.text)
+        # キャッシュされた関数を呼び出し
+        response_text = call_gemini_api_with_retry(prompt)
+        result_json = json.loads(response_text)
         if target_part == "all":
             st.session_state.report_parts["part1"] = result_json.get("part1", "")
             st.session_state.report_parts["part2"] = result_json.get("part2", "")
@@ -132,7 +153,8 @@ def generate_report(target_part="all"):
             st.session_state.report_parts[target_part] = result_json.get(target_part, "")
     except Exception as e:
         if "ResourceExhausted" in str(e) or "429" in str(e):
-            st.error("⚠️ AIの利用制限（アクセス集中）に達しました。1〜2分ほど待ってから再度お試しください！")
+            st.error("⚠️ AIの利用制限（アクセス集中）に達しました。現在2026年度版の無料枠で動作しているため、少し待ってから再度お試しください。")
+            st.info("💡 ヒント: 同じ内容での生成ならキャッシュが効くため、制限を消費せずに済みます。")
         else:
             st.error(f"文章の生成中にエラーが発生しました: {e}")
         return False
